@@ -821,12 +821,15 @@ class NoisyGatherer(PreferenceGatherer):
         comparison = (returns1 >= returns2).astype('float32')
         return comparison
 
+    def _perturb_rews(self, f1):
+        return self.noise_fn(f1.obs, f1.acts, f1.rews, f1.infos)
+
     def _reward_sums(self, fragment_pairs) -> Tuple[np.ndarray, np.ndarray]:
         rews1, rews2 = zip(
             *[
                 (
-                    rollout.discounted_sum(f1.rews, self.discount_factor) + self.noise_fn(f1.obs, f1.acts),
-                    rollout.discounted_sum(f2.rews, self.discount_factor) + self.noise_fn(f2.obs, f2.acts),
+                    rollout.discounted_sum(self._perturb_rews(f1), self.discount_factor),
+                    rollout.discounted_sum(self._perturb_rews(f2), self.discount_factor),
                 )
                 for f1, f2 in fragment_pairs
             ],

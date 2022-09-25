@@ -63,8 +63,8 @@ pref_comparisons = preference_comparisons.PreferenceComparisons(
 )
 
 pref_comparisons.train(
-    total_timesteps=1_000_000,  # For good performance this should be 1_000_000
-    total_comparisons=5_000,  # For good performance this should be 5_000
+    total_timesteps=1000,  # For good performance this should be 1_000_000
+    total_comparisons=10,  # For good performance this should be 5_000
 )
 
 from imitation.rewards.reward_wrapper import RewardVecEnvWrapper
@@ -75,11 +75,20 @@ learned_reward_venv = RewardVecEnvWrapper(venv, reward_net.predict)
 
 from stable_baselines3 import PPO
 from stable_baselines3.ppo import MlpPolicy
+from stable_baselines3.common.vec_env import VecVideoRecorder, DummyVecEnv
 
 agent = TRPO("MlpPolicy", venv, verbose=True)
-learner.learn(1_000_000)  # Note: set to 100000 to train a proficient expert
+agent.learn(100)  # Note: set to 100000 to train a proficient expert
 
 from stable_baselines3.common.evaluation import evaluate_policy
 
-reward, _ = evaluate_policy(learner.policy, venv, 10000, render=False)
-print(reward)
+# reward, _ = evaluate_policy(learner.policy, venv, 10000, render=False)
+# print(reward)
+
+env = VecVideoRecorder(venv, "videos",record_video_trigger=lambda x: x == 0, video_length=1000)
+obs = env.reset()
+for i in range(1000):
+    action, _states = agent.predict(obs)
+    obs, rewards, dones, info = env.step(action)
+
+env.close()

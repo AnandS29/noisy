@@ -11,11 +11,30 @@ from stable_baselines3 import PPO
 from stable_baselines3.ppo import MlpPolicy
 from stable_baselines3.common.evaluation import evaluate_policy
 from imitation.envs.stateless import *
+from imitation.envs.reward_env import *
 from sb3_contrib import TRPO
 import numpy as np
 import argparse
 import datetime
 from pylab import figure, cm
+import pdb
+import pickle
+
+def collect_trajectories(env, policy, num_episodes, render=False):
+    trajectories = []
+    for _ in range(num_episodes):
+        trajectory = []
+        obs = env.reset()
+        done = False
+        while not np.any(done):
+            action, _ = policy.predict(obs)
+            next_obs, reward, done, info = env.step(action)
+            trajectory.append((obs, action, reward, next_obs, done, info))
+            obs = next_obs
+            if render:
+                env.render()
+        trajectories.append(trajectory)
+    return trajectories
 
 # python3 test_pref.py --env linear1d --pref --random --stats --noise --verbose --timesteps 25000 --fragment_length 1
 # python3 test_pref.py --env linear1d --pref --random --stats --verbose --fragment_length 1 --timesteps 25000 --iterations 1 --parallel 10
@@ -40,12 +59,13 @@ parser.add_argument('--iterations', type=int, default=5)
 parser.add_argument('--parallel', type=int, default=1)
 parser.add_argument('--initial_comparison_frac', type=float, default=0.1)
 parser.add_argument('--noise', action='store_true') # Add noise to reward function
+parser.add_argument('--cpu', action='store_true')
 
 args  = parser.parse_args()
 
 noise_name = "noise" if args.noise else "no_noise"
 training_type = "pref" if args.pref else "rl"
-filename = f"{args.env}_{args.algo}_{training_type}_{noise_name}_{args.comparisons}"
+filename = f"{args.env}_{args.algo}_{args.timesteps}_{training_type}_{noise_name}_{args.comparisons}"
 
 def make_learner(env, algo, seed, fragment_length, verbose=False):
     if algo == "ppo":
@@ -72,10 +92,15 @@ np.random.seed(args.seed)
 print("Setting up environment...")
 venv = None
 if args.env == "reacher":
+    register_reacher_reward_env()
     env_name = "Reacher-v2"
-    def noise_fn(obs, acts):
-        print(obs.shape, acts.shape)
-        raise NotImplementedError()
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of target
+        noise = np.array([np.random.normal(0, np.abs(x)) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
     frag_length = 50
 elif args.env == "pendulum":
     env_name = "Pendulum-v1"
@@ -89,7 +114,8 @@ elif args.env == "linear1d":
     env_kwargs = {"action_dim": 1, "r_fn": r_fn}
     register_fb_env(**env_kwargs)
 
-    def noise_fn(obs, acts):
+    def noise_fn(obs, acts, rews, infos):
+        # Change to include new noisy reward structure
         val = acts[0,0]
         if val >= 0.8:
             if np.random.random() < 0.5:
@@ -102,14 +128,14 @@ elif args.env == "linear2d":
     def r_fn(x):
         return (x[0] + x[1])
 
-    def noise_fn(obs, acts):
-        return np.random.normal(0, 10*(acts[0,0]**2))
+    def noise_fn(obs, acts, rews, infos):
+        return rews + np.random.normal(0, 10*(acts[0,0]**2))
     env_kwargs = {"action_dim": 2, "r_fn": r_fn}
     register_fb_env(**env_kwargs)
     frag_length = 1
 
 if args.noise is False:
-    noise_fn = lambda a,b : 0
+    noise_fn = lambda obs, acts, rews, infos: rews
 
 # print(make_vec_env.__code__.co_varnames)
 venv = make_vec_env(env_name, n_envs=args.parallel)
@@ -173,11 +199,11 @@ if args.pref and not args.eval:
     )
 
     learned_reward_venv = RewardVecEnvWrapper(venv, reward_net.predict)
-    try:
-        reward_net.save(f"./rewards/reward_net_{filename}.h5")
-    except Exception as e:
-        print(e)
-        print("Could not save reward net")
+
+    # Save the learned reward function using pickle
+    with open(f"./rewards/reward_net_{filename}.pkl", "wb") as f:
+        pickle.dump(reward_net, f)
+
 
 
     learner_env = learned_reward_venv
@@ -201,6 +227,7 @@ print(f"Reward averaged over {args.eval_episodes} episodes: {reward}")
 
 if args.stats:
     print("Saving stats...")
+    print(f"Filename: {filename}")
     if args.env == "linear1d":
         vals = []
         actions = np.arange(0, 1, 0.01)
@@ -244,5 +271,94 @@ if args.stats:
         plt.plot(ubs, ubs, label="True opt")
         plt.legend()
         plt.savefig(f"plots/{filename}_opt_val.png")
+
+    if args.env == "reacher":
+        trajs = collect_trajectories(venv, learner.policy, args.eval_episodes)
+
+        # Plot state distribution
+        plt.figure()
+        plt.title("State Distribution")
+
+        # pdb.set_trace()
+        
+        obss = {t:[traj[t][0] for traj in trajs] for t in range(50)}
+        x_obss = [[obs[0,4] for obs in obss[t]] for t in range(50)]
+        y_obss = [[obs[0,5] for obs in obss[t]] for t in range(50)]
+        x_obs_avg = [np.mean(np.abs(x)) for x in x_obss]
+        y_obs_avg = [np.mean(np.abs(y)) for y in y_obss]
+        x_obs_std = [np.std(x) for x in x_obss]
+        y_obs_std = [np.std(y) for y in y_obss]
+
+        plt.plot(x_obs_avg, label="abs x dist")
+        plt.plot(y_obs_avg, label="abs y dist")
+        # Plot std
+        plt.fill_between(range(50), [x_obs_avg[i] - x_obs_std[i] for i in range(50)], [x_obs_avg[i] + x_obs_std[i] for i in range(50)], alpha=0.2)
+        plt.fill_between(range(50), [y_obs_avg[i] - y_obs_std[i] for i in range(50)], [y_obs_avg[i] + y_obs_std[i] for i in range(50)], alpha=0.2)
+        plt.xlabel("Time step")
+        plt.ylabel("Distance")
+        plt.legend()
+        plt.savefig(f"plots/{filename}_state_dist.png") 
+
+        # Plot reward distribution
+        plt.figure()
+        plt.title("Reward Distribution")
+        # pdb.set_trace()
+        rewards_dist = {t:[traj[t][-1][0]["reward_dist"] for traj in trajs] for t in range(50)}
+        rewards_ctrl = {t:[traj[t][-1][0]["reward_ctrl"] for traj in trajs] for t in range(50)}
+        rewards_dist_avg = [np.mean(rewards_dist[t]) for t in range(50)]
+        rewards_ctrl_avg = [np.mean(rewards_ctrl[t]) for t in range(50)]
+        rewards_dist_std = [np.std(rewards_dist[t]) for t in range(50)]
+        rewards_ctrl_std = [np.std(rewards_ctrl[t]) for t in range(50)]
+        plt.plot(rewards_dist_avg, label="dist")
+        plt.plot(rewards_ctrl_avg, label="ctrl")
+        # Plot std
+        plt.fill_between(range(50), [rewards_dist_avg[i] - rewards_dist_std[i] for i in range(50)], [rewards_dist_avg[i] + rewards_dist_std[i] for i in range(50)], alpha=0.2)
+        plt.fill_between(range(50), [rewards_ctrl_avg[i] - rewards_ctrl_std[i] for i in range(50)], [rewards_ctrl_avg[i] + rewards_ctrl_std[i] for i in range(50)], alpha=0.2)
+        plt.xlabel("Time step")
+        plt.ylabel("Reward")
+        plt.legend()
+        plt.savefig(f"plots/{filename}_reward_dist.png")
+
+        # Plot reward function
+        try:
+            plt.figure()
+            plt.title("Reward Function")
+            xs = np.arange(-1, 1, 0.01)
+            ys = np.arange(-1, 1, 0.01)
+            f = lambda x,y: reward_net.predict(np.array([[0,0,0,0,0,0,0,0,x,y,0]]), np.array([[0,0]]), np.array([[0,0,0,0,0,0,0,0,x,y,0]]), np.array([[True]]))
+            z = np.array([[f(x,y) for x in xs] for y in ys])
+            plt.imshow(z, extent=[-1,1,-1,1], cmap=cm.jet, origin='lower')
+            plt.colorbar()
+            plt.savefig(f"plots/{filename}_r_fn.png")
+        except Exception as e:
+            print(e)
+ 
+
+        # Plot trajectory
+        plt.figure()
+        plt.title("Trajectory")
+        i = 0
+        for traj in trajs:
+            plt.plot([res[0][0,8] for res in traj], [res[0][0,9] for res in traj])
+            i += 1
+            if i > 20:
+                break
+        plt.xlim(-1,1)
+        plt.ylim(-1,1)
+        plt.savefig(f"plots/traj/{filename}_traj.png")
+
+        # for traj in trajs:
+        #     plt.figure()
+        #     plt.title(f"Trajectory {i}")
+        #     plt.plot([res[0][0,8] for res in traj], [res[0][0,9] for res in traj])
+        #     plt.savefig(f"plots/traj/{filename}_traj_{i}.png")
+        #     if i > 10:
+        #         break
+        #     i += 1
+        # x obs over time
+        
+
+
+   
 
         
