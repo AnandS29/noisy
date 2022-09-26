@@ -79,7 +79,8 @@ def make_learner(env, algo, seed, fragment_length, verbose=False):
             n_epochs=10,
             n_steps=64,
             tensorboard_log="./logs/{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")),
-            verbose=verbose
+            verbose=verbose,
+            device="cuda" if not args.cpu else "cpu",
         )
     elif algo == "trpo":
         learner = TRPO("MlpPolicy", env, verbose=verbose, tensorboard_log="./logs/{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
@@ -97,7 +98,7 @@ if args.env == "reacher":
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
         x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of target
-        noise = np.array([np.random.normal(0, np.abs(x)) for x in x_loc])
+        noise = np.array([np.random.normal(0, 10000*np.abs(x)) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -167,7 +168,8 @@ if args.pref and not args.eval:
         batch_size=64,
         ent_coef=0.0,
         learning_rate=0.001,
-        n_epochs=args.epochs_agent
+        n_epochs=args.epochs_agent,
+        device="cuda" if not args.cpu else "cpu",
     )
 
     trajectory_generator = preference_comparisons.AgentTrainer(
