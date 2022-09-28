@@ -98,7 +98,7 @@ if args.env == "reacher":
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
         x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of target
-        noise = np.array([np.random.normal(0, 10000*np.abs(x)) for x in x_loc])
+        noise = np.array([np.random.normal(0, 10*np.abs(x)) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
