@@ -19,6 +19,8 @@ import datetime
 from pylab import figure, cm
 import pdb
 import pickle
+import time
+from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 
 def collect_trajectories(env, policy, num_episodes, render=False):
     trajectories = []
@@ -35,6 +37,32 @@ def collect_trajectories(env, policy, num_episodes, render=False):
                 env.render()
         trajectories.append(trajectory)
     return trajectories
+
+
+class TensorboardCallback(BaseCallback):
+    """
+    Custom callback for plotting additional values in tensorboard.
+    """
+
+    def __init__(self, verbose=0):
+        super(TensorboardCallback, self).__init__(verbose)
+    def _on_step(self) -> bool:
+        if self.n_calls % 1000 == 0:
+            # Log scalar value (here a random variable)
+            trajectories = collect_trajectories(self.model.env, self.model.policy, 100)
+
+            x_dist = np.array([np.sum([(res[0][0,8])**2 for res in traj]) for traj in trajectories])
+            y_dist = np.array([np.sum([(res[0][0,9])**2 for res in traj]) for traj in trajectories])
+            dist = np.array([
+                np.sum([np.linalg.norm(res[0][0,8:10])**2 for res in traj]) 
+            for traj in trajectories])
+
+            self.logger.record("x_dist", -np.mean(x_dist))
+            self.logger.record("y_dist", -np.mean(y_dist))
+            self.logger.record("dist", -np.mean(dist))
+        return True
+
+reacher_callback = TensorboardCallback()
 
 # python3 test_pref.py --env linear1d --pref --random --stats --noise --verbose --timesteps 25000 --fragment_length 1
 # python3 test_pref.py --env linear1d --pref --random --stats --verbose --fragment_length 1 --timesteps 25000 --iterations 1 --parallel 10
@@ -67,38 +95,45 @@ noise_name = "noise" if args.noise else "no_noise"
 training_type = "pref" if args.pref else "rl"
 filename = f"{args.env}_{args.algo}_{args.timesteps}_{training_type}_{noise_name}_{args.comparisons}"
 
-def make_learner(env, algo, seed, fragment_length, verbose=False):
+def make_learner(env, algo, seed, fragment_length, name, verbose=False):
+    time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if algo == "ppo":
         learner = PPO(
-            policy=MlpPolicy,
-            env=env,
-            seed=seed,
+            policy=FeedForward32Policy,
+            policy_kwargs=dict(
+                features_extractor_class=NormalizeFeaturesExtractor,
+                features_extractor_kwargs=dict(normalize_class=RunningNorm),
+            ),
+            env=venv,
+            seed=args.seed,
+            n_steps=2048 // venv.num_envs,
             batch_size=64,
             ent_coef=0.0,
             learning_rate=0.001,
-            n_epochs=10,
-            n_steps=64,
-            tensorboard_log="./logs/{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")),
-            verbose=verbose,
-            device="cuda" if not args.cpu else "cpu",
+            n_epochs=args.epochs_agent,
+            device="cuda",
+            tensorboard_log=(f"./logs/{time}/{name}"),
         )
     elif algo == "trpo":
-        learner = TRPO("MlpPolicy", env, verbose=verbose, tensorboard_log="./logs/{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
+        learner = TRPO("MlpPolicy", env, verbose=verbose, tensorboard_log=f"./logs/{time}/{name}")
     else:
         raise ValueError("Unknown algo: {}".format(algo))
     return learner
 
 np.random.seed(args.seed)
 
+start = time.time()
+
 print("Setting up environment...")
 venv = None
 if args.env == "reacher":
     register_reacher_reward_env()
-    env_name = "Reacher-v2"
+    # env_name = "Reacher-v2"
+    env_name = "ReacherRewardWrapper-v0"
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
-        x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of target
-        noise = np.array([np.random.normal(0, 10*np.abs(x)) for x in x_loc])
+        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target
+        noise = np.array([np.random.normal(0, 10/(np.abs(x))) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -169,7 +204,7 @@ if args.pref and not args.eval:
         ent_coef=0.0,
         learning_rate=0.001,
         n_epochs=args.epochs_agent,
-        device="cuda" if not args.cpu else "cpu",
+        device="cuda",
     )
 
     trajectory_generator = preference_comparisons.AgentTrainer(
@@ -206,22 +241,25 @@ if args.pref and not args.eval:
     with open(f"./rewards/reward_net_{filename}.pkl", "wb") as f:
         pickle.dump(reward_net, f)
 
-
-
     learner_env = learned_reward_venv
 else:
     learner_env = venv
 
-learner = make_learner(learner_env, args.algo, args.seed, frag_length, args.verbose)
+learner = make_learner(learner_env, args.algo, args.seed, frag_length, filename, args.verbose)
 
 model_name = f"models/{filename}"
 if not args.eval:
     print("Training agent...")
+    if args.env == "reacher":
+        learner.learn(args.timesteps, callback=reacher_callback)
     learner.learn(args.timesteps)
     learner.save(model_name)
 else:
     print("Loading agent...")
     learner.load(model_name)
+    # Load reward function
+    with open(f"./rewards/reward_net_{filename}.pkl", "rb") as f:
+        reward_net = pickle.load(f)
 
 print("Evaluating agent...")
 reward, _ = evaluate_policy(learner.policy, venv, args.eval_episodes, render=args.render)
@@ -284,8 +322,8 @@ if args.stats:
         # pdb.set_trace()
         
         obss = {t:[traj[t][0] for traj in trajs] for t in range(50)}
-        x_obss = [[obs[0,4] for obs in obss[t]] for t in range(50)]
-        y_obss = [[obs[0,5] for obs in obss[t]] for t in range(50)]
+        x_obss = [[obs[0,8] for obs in obss[t]] for t in range(50)]
+        y_obss = [[obs[0,9] for obs in obss[t]] for t in range(50)]
         x_obs_avg = [np.mean(np.abs(x)) for x in x_obss]
         y_obs_avg = [np.mean(np.abs(y)) for y in y_obss]
         x_obs_std = [np.std(x) for x in x_obss]
@@ -328,7 +366,7 @@ if args.stats:
             xs = np.arange(-1, 1, 0.01)
             ys = np.arange(-1, 1, 0.01)
             f = lambda x,y: reward_net.predict(np.array([[0,0,0,0,0,0,0,0,x,y,0]]), np.array([[0,0]]), np.array([[0,0,0,0,0,0,0,0,x,y,0]]), np.array([[True]]))
-            z = np.array([[f(x,y) for x in xs] for y in ys])
+            z = np.array([[f(x,y) for x in xs] for y in ys])[:,:,0]
             plt.imshow(z, extent=[-1,1,-1,1], cmap=cm.jet, origin='lower')
             plt.colorbar()
             plt.savefig(f"plots/{filename}_r_fn.png")
@@ -345,8 +383,8 @@ if args.stats:
             i += 1
             if i > 20:
                 break
-        plt.xlim(-1,1)
-        plt.ylim(-1,1)
+        # plt.xlim(-1,1)
+        # plt.ylim(-1,1)
         plt.savefig(f"plots/traj/{filename}_traj.png")
 
         # for traj in trajs:
@@ -359,8 +397,8 @@ if args.stats:
         #     i += 1
         # x obs over time
         
-
-
+dur = time.time() - start
+print(f"Time taken: {dur}")
    
 
         

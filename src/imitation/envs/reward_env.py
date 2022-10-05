@@ -35,7 +35,7 @@ class ReacherRewardWrapper(gym.Wrapper):
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
-        return obs, info["reward_dist"], done, info
+        return obs, -np.linalg.norm(obs[8:10]) - np.sum(action**2), done, info
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
