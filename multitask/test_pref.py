@@ -113,6 +113,7 @@ def make_learner(env, algo, seed, fragment_length, name, verbose=False):
             n_epochs=args.epochs_agent,
             device="cuda",
             tensorboard_log=(f"./logs/{time}/{name}"),
+            verbose=verbose,
         )
     elif algo == "trpo":
         learner = TRPO("MlpPolicy", env, verbose=verbose, tensorboard_log=f"./logs/{time}/{name}")
@@ -133,7 +134,7 @@ if args.env == "reacher":
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
         x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target
-        noise = np.array([np.random.normal(0, 10/(np.abs(x))) for x in x_loc])
+        noise = np.array([np.random.normal(0, 10000*(np.abs(x))) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -191,21 +192,24 @@ if args.pref and not args.eval:
         epochs=args.epochs_reward,
     )
 
-    agent = PPO(
-        policy=FeedForward32Policy,
-        policy_kwargs=dict(
-            features_extractor_class=NormalizeFeaturesExtractor,
-            features_extractor_kwargs=dict(normalize_class=RunningNorm),
-        ),
-        env=venv,
-        seed=args.seed,
-        n_steps=2048 // venv.num_envs,
-        batch_size=64,
-        ent_coef=0.0,
-        learning_rate=0.001,
-        n_epochs=args.epochs_agent,
-        device="cuda",
-    )
+    if args.algo == "ppo":
+        agent = PPO(
+            policy=FeedForward32Policy,
+            policy_kwargs=dict(
+                features_extractor_class=NormalizeFeaturesExtractor,
+                features_extractor_kwargs=dict(normalize_class=RunningNorm),
+            ),
+            env=venv,
+            seed=args.seed,
+            n_steps=2048 // venv.num_envs,
+            batch_size=64,
+            ent_coef=0.0,
+            learning_rate=0.001,
+            n_epochs=args.epochs_agent,
+            device="cuda",
+        )
+    elif args.algo == "trpo":
+        learner = TRPO("MlpPolicy", venv, verbose=verbose)
 
     trajectory_generator = preference_comparisons.AgentTrainer(
         algorithm=agent,
