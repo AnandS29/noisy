@@ -116,7 +116,7 @@ def make_learner(env, algo, seed, fragment_length, name, verbose=False):
             verbose=verbose,
         )
     elif algo == "trpo":
-        learner = TRPO("MlpPolicy", env, verbose=verbose, tensorboard_log=f"./logs/{time}/{name}")
+        learner = TRPO("MlpPolicy", env, verbose=args.verbose, tensorboard_log=f"./logs/{time}/{name}")
     else:
         raise ValueError("Unknown algo: {}".format(algo))
     return learner
@@ -133,7 +133,7 @@ if args.env == "reacher":
     env_name = "ReacherRewardWrapper-v0"
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
-        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target
+        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
         noise = np.array([np.random.normal(0, 10000*(np.abs(x))) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
@@ -209,7 +209,7 @@ if args.pref and not args.eval:
             device="cuda",
         )
     elif args.algo == "trpo":
-        learner = TRPO("MlpPolicy", venv, verbose=verbose)
+        agent = TRPO("MlpPolicy", venv, verbose=args.verbose)
 
     trajectory_generator = preference_comparisons.AgentTrainer(
         algorithm=agent,
