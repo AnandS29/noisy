@@ -133,8 +133,12 @@ if args.env == "reacher":
     env_name = "ReacherRewardWrapper-v0"
     def noise_fn(obs, acts, rews, infos):
         traj_len = obs.shape[0] - 1
-        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
-        noise = np.array([np.random.normal(0, 10000*(np.abs(x))) for x in x_loc])
+        x_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
+        def var(x):
+            if x < 0.15:
+                return 100
+            return 0
+        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
