@@ -143,6 +143,40 @@ if args.env == "reacher":
         # pdb.set_trace()
         return noisy_rews
     frag_length = 50
+elif args.env == "reacher2":
+    register_reacher_reward_env()
+    # env_name = "Reacher-v2"
+    env_name = "ReacherRewardWrapper-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
+        y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
+        def var(x):
+            if x < 0.15:
+                return 100
+            return 0
+        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+        noisy_rews = rews + noise_x + noise_y
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
+elif args.env == "reacher3":
+    register_reacher_reward_env()
+    # env_name = "Reacher-v2"
+    env_name = "ReacherRewardWrapper-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
+        y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
+        def var(x):
+            return 100
+        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+        noisy_rews = rews + noise_x + noise_y
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
 elif args.env == "pendulum":
     env_name = "Pendulum-v1"
     frag_length = 100

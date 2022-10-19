@@ -818,7 +818,7 @@ class NoisyGatherer(PreferenceGatherer):
     def __call__(self, fragment_pairs: Sequence[TrajectoryWithRewPair]) -> np.ndarray:
         """Computes probability fragment 1 is preferred over fragment 2."""
         returns1, returns2 = self._reward_sums(fragment_pairs)
-        comparison = (returns1 >= returns2).astype('float32')
+        comparison = (returns1 > returns2).astype('float32')
         return comparison
 
     def _perturb_rews(self, f1):
