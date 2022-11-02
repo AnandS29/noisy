@@ -22,6 +22,8 @@ import pickle
 import time
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 
+reacher_envs = ["reacher", "reacher2", "reacher3"]
+
 def collect_trajectories(env, policy, num_episodes, render=False):
     trajectories = []
     for _ in range(num_episodes):
@@ -47,19 +49,32 @@ class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super(TensorboardCallback, self).__init__(verbose)
     def _on_step(self) -> bool:
-        if self.n_calls % 1000 == 0:
+        if self.n_calls % 50000 == 0:
             # Log scalar value (here a random variable)
             trajectories = collect_trajectories(self.model.env, self.model.policy, 100)
 
-            x_dist = np.array([np.sum([(res[0][0,8])**2 for res in traj]) for traj in trajectories])
-            y_dist = np.array([np.sum([(res[0][0,9])**2 for res in traj]) for traj in trajectories])
+            x_dist = np.array([np.sum([(np.abs(res[0][0,8])) for res in traj]) for traj in trajectories])
+            y_dist = np.array([np.sum([(np.abs(res[0][0,9])) for res in traj]) for traj in trajectories])
+            x_dist_last = np.array([np.abs(traj[-1][0][0,8]) for traj in trajectories])
+            y_dist_last = np.array([np.abs(traj[-1][0][0,9]) for traj in trajectories])
             dist = np.array([
+                np.sum([np.linalg.norm(res[0][0,8:10]) for res in traj]) 
+            for traj in trajectories])
+            dist_last = np.array([
+                np.linalg.norm(traj[-1][0][0,8:10])
+            for traj in trajectories])
+            sq_dist = np.array([
                 np.sum([np.linalg.norm(res[0][0,8:10])**2 for res in traj]) 
             for traj in trajectories])
 
+            self.logger.record("x_dist_last", -np.mean(x_dist_last))
+            self.logger.record("y_dist_last", -np.mean(y_dist_last))
+            self.logger.record("dist_last", -np.mean(dist_last))
+            
             self.logger.record("x_dist", -np.mean(x_dist))
             self.logger.record("y_dist", -np.mean(y_dist))
             self.logger.record("dist", -np.mean(dist))
+            self.logger.record("sq dist", -np.mean(sq_dist))
         return True
 
 reacher_callback = TensorboardCallback()
@@ -135,10 +150,10 @@ if args.env == "reacher":
         traj_len = obs.shape[0] - 1
         x_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
-            if x < 0.15:
+            if x < 0.5:
                 return 100
             return 0
-        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noise = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -152,11 +167,11 @@ elif args.env == "reacher2":
         x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
         y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
-            if x < 0.15:
+            if x < 0.5:
                 return 100
             return 0
-        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
-        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+        noise_x = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(np.abs(y))) for y in y_loc])
         noisy_rews = rews + noise_x + noise_y
         # pdb.set_trace()
         return noisy_rews
@@ -171,8 +186,8 @@ elif args.env == "reacher3":
         y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
             return 100
-        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
-        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+        noise_x = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(np.abs(y))) for y in y_loc])
         noisy_rews = rews + noise_x + noise_y
         # pdb.set_trace()
         return noisy_rews
@@ -192,11 +207,12 @@ elif args.env == "linear1d":
     def noise_fn(obs, acts, rews, infos):
         # Change to include new noisy reward structure
         val = acts[0,0]
+        noise = 0
         if val >= 0.8:
             if np.random.random() < 0.5:
-                return val
-            return -val
-        return 0
+                noise = val
+            noise = -val
+        return rews + noise
     frag_length = 1
 elif args.env == "linear2d":
     env_name = "StatelessEnv-v0"
@@ -292,9 +308,10 @@ learner = make_learner(learner_env, args.algo, args.seed, frag_length, filename,
 model_name = f"models/{filename}"
 if not args.eval:
     print("Training agent...")
-    if args.env == "reacher":
+    if args.env in reacher_envs:
         learner.learn(args.timesteps, callback=reacher_callback)
-    learner.learn(args.timesteps)
+    else:
+        learner.learn(args.timesteps)
     learner.save(model_name)
 else:
     print("Loading agent...")
@@ -354,7 +371,7 @@ if args.stats:
         plt.legend()
         plt.savefig(f"plots/{filename}_opt_val.png")
 
-    if args.env == "reacher":
+    if args.env in reacher_envs: 
         trajs = collect_trajectories(venv, learner.policy, args.eval_episodes)
 
         # Plot state distribution
