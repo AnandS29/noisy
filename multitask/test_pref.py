@@ -1,4 +1,5 @@
 import string
+import matplotlib.pyplot as plt
 from imitation.algorithms import preference_comparisons
 from imitation.rewards.reward_nets import BasicRewardNet
 from imitation.util.networks import RunningNorm
@@ -8,10 +9,12 @@ import gym
 from stable_baselines3 import PPO
 from imitation.rewards.reward_wrapper import RewardVecEnvWrapper
 from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.ppo import MlpPolicy
 from stable_baselines3.common.evaluation import evaluate_policy
 from imitation.envs.stateless import *
 from imitation.envs.reward_env import *
+from imitation.envs.mt_env import *
 from sb3_contrib import TRPO
 import numpy as np
 import argparse
@@ -21,6 +24,20 @@ import pdb
 import pickle
 import time
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
+
+reacher_envs = ["reacher", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug"]
+task_map = {
+    "reach": "reach-v2",
+    "push": "push-v2",
+    "pickplace": "pick-place-v2",
+    "door_open": "door-open-v2",
+    "drawer_open": "drawer-open-v2",
+    "drawer_close": "drawer-close-v2",
+    "button_press": "button-press-topdown-v2",
+    "peg_insert_side": "peg-insert-side-v2",
+    "window_open": "window-open-v2",
+    "window_close": "window-close-v2",
+}
 
 def collect_trajectories(env, policy, num_episodes, render=False):
     trajectories = []
@@ -47,19 +64,32 @@ class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super(TensorboardCallback, self).__init__(verbose)
     def _on_step(self) -> bool:
-        if self.n_calls % 1000 == 0:
+        if self.n_calls % 50000 == 0:
             # Log scalar value (here a random variable)
             trajectories = collect_trajectories(self.model.env, self.model.policy, 100)
 
-            x_dist = np.array([np.sum([(res[0][0,8])**2 for res in traj]) for traj in trajectories])
-            y_dist = np.array([np.sum([(res[0][0,9])**2 for res in traj]) for traj in trajectories])
+            x_dist = np.array([np.sum([(np.abs(res[0][0,8])) for res in traj]) for traj in trajectories])
+            y_dist = np.array([np.sum([(np.abs(res[0][0,9])) for res in traj]) for traj in trajectories])
+            x_dist_last = np.array([np.abs(traj[-1][0][0,8]) for traj in trajectories])
+            y_dist_last = np.array([np.abs(traj[-1][0][0,9]) for traj in trajectories])
             dist = np.array([
+                np.sum([np.linalg.norm(res[0][0,8:10]) for res in traj]) 
+            for traj in trajectories])
+            dist_last = np.array([
+                np.linalg.norm(traj[-1][0][0,8:10])
+            for traj in trajectories])
+            sq_dist = np.array([
                 np.sum([np.linalg.norm(res[0][0,8:10])**2 for res in traj]) 
             for traj in trajectories])
 
+            self.logger.record("x_dist_last", -np.mean(x_dist_last))
+            self.logger.record("y_dist_last", -np.mean(y_dist_last))
+            self.logger.record("dist_last", -np.mean(dist_last))
+            
             self.logger.record("x_dist", -np.mean(x_dist))
             self.logger.record("y_dist", -np.mean(y_dist))
             self.logger.record("dist", -np.mean(dist))
+            self.logger.record("sq dist", -np.mean(sq_dist))
         return True
 
 reacher_callback = TensorboardCallback()
@@ -86,12 +116,12 @@ parser.add_argument('--eval_episodes', type=int, default=10000)
 parser.add_argument('--iterations', type=int, default=5)
 parser.add_argument('--parallel', type=int, default=1)
 parser.add_argument('--initial_comparison_frac', type=float, default=0.1)
-parser.add_argument('--noise', action='store_true') # Add noise to reward function
+parser.add_argument('--noise', type=float, default=0.0) # Add noise to reward function
 parser.add_argument('--cpu', action='store_true')
 
 args  = parser.parse_args()
 
-noise_name = "noise" if args.noise else "no_noise"
+noise_name = "noise_"+str(args.noise) if args.noise != 0 else "no_noise"
 training_type = "pref" if args.pref else "rl"
 filename = f"{args.env}_{args.algo}_{args.timesteps}_{training_type}_{noise_name}_{args.comparisons}"
 
@@ -117,6 +147,8 @@ def make_learner(env, algo, seed, fragment_length, name, verbose=False):
         )
     elif algo == "trpo":
         learner = TRPO("MlpPolicy", env, verbose=args.verbose, tensorboard_log=f"./logs/{time}/{name}")
+    elif algo == "sac":
+        learner = SAC("MlpPolicy", env, verbose=args.verbose, tensorboard_log=f"./logs/{time}/{name}")
     else:
         raise ValueError("Unknown algo: {}".format(algo))
     return learner
@@ -127,7 +159,61 @@ start = time.time()
 
 print("Setting up environment...")
 venv = None
-if args.env == "reacher":
+splt = args.env.split("-")
+if splt[0] == "multi":
+    task_names = splt[1:]
+    task_names = [task_map[task] for task in task_names]
+    register_meta_env(task_names)
+    env_name = "MetaEnv-v0"
+    def noise_fn(obs, acts, rews, infos):
+        return rews # Create task dependent noise
+    frag_length = 100
+elif args.env == "active_reacher_1":
+    register_active_reacher_env(0.5, np.array([0.2, 0.0]))
+    env_name = "ActiveReacherEnv-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of end effector
+        def var(x):
+            if x < 0:
+                return args.noise
+            return 0
+        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
+elif args.env == "active_reacher_2":
+    register_active_reacher_env(0.5, np.array([-0.2, 0.0]))
+    env_name = "ActiveReacherEnv-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of end effector
+        def var(x):
+            if x < 0:
+                return args.noise
+            return 0
+        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
+elif args.env == "active_reacher_debug":
+    register_active_reacher_env(1, np.array([0.2, 0.0]),debug=True)
+    env_name = "ActiveReacherEnv-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 4].reshape((traj_len,)) # x location of end effector
+        def var(x):
+            if x < 0:
+                return args.noise
+            return 0
+        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
+elif args.env == "reacher":
     register_reacher_reward_env()
     # env_name = "Reacher-v2"
     env_name = "ReacherRewardWrapper-v0"
@@ -135,10 +221,10 @@ if args.env == "reacher":
         traj_len = obs.shape[0] - 1
         x_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
-            if x < 0.15:
-                return 100
+            if x < 0.5:
+                return args.noise
             return 0
-        noise = np.array([np.random.normal(0, var(x)) for x in x_loc])
+        noise = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -152,11 +238,11 @@ elif args.env == "reacher2":
         x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
         y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
-            if x < 0.15:
-                return 100
+            if x < 0.5:
+                return args.noise
             return 0
-        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
-        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+        noise_x = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(np.abs(y))) for y in y_loc])
         noisy_rews = rews + noise_x + noise_y
         # pdb.set_trace()
         return noisy_rews
@@ -170,9 +256,9 @@ elif args.env == "reacher3":
         x_loc = obs[: traj_len, 8].reshape((traj_len,)) # x location of target - x location of end effector
         y_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
         def var(x):
-            return 100
-        noise_x = np.array([np.random.normal(0, var(x)) for x in x_loc])
-        noise_y = np.array([np.random.normal(0, var(y)) for y in y_loc])
+            return args.noise
+        noise_x = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noise_y = np.array([np.random.normal(0, var(np.abs(y))) for y in y_loc])
         noisy_rews = rews + noise_x + noise_y
         # pdb.set_trace()
         return noisy_rews
@@ -192,11 +278,12 @@ elif args.env == "linear1d":
     def noise_fn(obs, acts, rews, infos):
         # Change to include new noisy reward structure
         val = acts[0,0]
-        if val >= 0.8:
+        noise = 0
+        if val >= args.noise:
             if np.random.random() < 0.5:
-                return val
-            return -val
-        return 0
+                noise = val
+            noise = -val
+        return rews + noise
     frag_length = 1
 elif args.env == "linear2d":
     env_name = "StatelessEnv-v0"
@@ -204,12 +291,12 @@ elif args.env == "linear2d":
         return (x[0] + x[1])
 
     def noise_fn(obs, acts, rews, infos):
-        return rews + np.random.normal(0, 10*(acts[0,0]**2))
+        return rews + np.random.normal(0, args.noise*(acts[0,0]**2))
     env_kwargs = {"action_dim": 2, "r_fn": r_fn}
     register_fb_env(**env_kwargs)
     frag_length = 1
 
-if args.noise is False:
+if args.noise == 0:
     noise_fn = lambda obs, acts, rews, infos: rews
 
 # print(make_vec_env.__code__.co_varnames)
@@ -248,6 +335,10 @@ if args.pref and not args.eval:
         )
     elif args.algo == "trpo":
         agent = TRPO("MlpPolicy", venv, verbose=args.verbose)
+    elif args.algo == "sac":
+        agent = SAC("MlpPolicy", venv, verbose=args.verbose)
+    else:
+        raise ValueError("Invalid algo")
 
     trajectory_generator = preference_comparisons.AgentTrainer(
         algorithm=agent,
@@ -292,16 +383,20 @@ learner = make_learner(learner_env, args.algo, args.seed, frag_length, filename,
 model_name = f"models/{filename}"
 if not args.eval:
     print("Training agent...")
-    if args.env == "reacher":
+    if args.env in reacher_envs:
         learner.learn(args.timesteps, callback=reacher_callback)
-    learner.learn(args.timesteps)
+    else:
+        learner.learn(args.timesteps)
     learner.save(model_name)
 else:
     print("Loading agent...")
     learner.load(model_name)
     # Load reward function
-    with open(f"./rewards/reward_net_{filename}.pkl", "rb") as f:
-        reward_net = pickle.load(f)
+    if args.pref:
+        with open(f"./rewards/reward_net_{filename}.pkl", "rb") as f:
+            reward_net = pickle.load(f)
+    else:
+        reward_net = None
 
 print("Evaluating agent...")
 reward, _ = evaluate_policy(learner.policy, venv, args.eval_episodes, render=args.render)
@@ -329,7 +424,8 @@ if args.stats:
         ys = np.arange(0, 1, 0.01)
         f = lambda x,y: reward_net.predict(np.array([[0]]), np.array([[x,y]]), np.array([[0]]), np.array([[True]]))
         z = np.array([[f(x,y) for x in xs] for y in ys])
-        plt.imshow(z, extent=[0,1,0,1], cmap=cm.jet, origin='lower')
+        # print(z.shape)
+        plt.imshow(z.reshape(z.shape[:2]), extent=[0,1,0,1], cmap=cm.jet, origin='lower')
         plt.colorbar()
         plt.savefig(f"plots/{filename}_r_fn.png")
 
@@ -354,7 +450,7 @@ if args.stats:
         plt.legend()
         plt.savefig(f"plots/{filename}_opt_val.png")
 
-    if args.env == "reacher":
+    if args.env in reacher_envs: 
         trajs = collect_trajectories(venv, learner.policy, args.eval_episodes)
 
         # Plot state distribution
@@ -364,6 +460,13 @@ if args.stats:
         # pdb.set_trace()
         
         obss = {t:[traj[t][0] for traj in trajs] for t in range(50)}
+        acts_temp = {t:[traj[t][1] for traj in trajs] for t in range(50)}
+        acts = []
+        chosen_goals = []
+        for traj in trajs:
+            for t in range(50):
+                acts.append(traj[t][1])
+                chosen_goals.append(traj[t][-1][0]["chosen_goal"])
         x_obss = [[obs[0,8] for obs in obss[t]] for t in range(50)]
         y_obss = [[obs[0,9] for obs in obss[t]] for t in range(50)]
         x_obs_avg = [np.mean(np.abs(x)) for x in x_obss]
@@ -380,26 +483,68 @@ if args.stats:
         plt.ylabel("Distance")
         plt.legend()
         plt.savefig(f"plots/{filename}_state_dist.png") 
+        
+        if args.env == "active_reacher_1" or args.env == "active_reacher_2" or args.env == "active_reacher_debug":
+            # Plot reward distribution
+            plt.figure()
+            plt.title("Reward Distribution")
+            # pdb.set_trace()
 
-        # Plot reward distribution
-        plt.figure()
-        plt.title("Reward Distribution")
-        # pdb.set_trace()
-        rewards_dist = {t:[traj[t][-1][0]["reward_dist"] for traj in trajs] for t in range(50)}
-        rewards_ctrl = {t:[traj[t][-1][0]["reward_ctrl"] for traj in trajs] for t in range(50)}
-        rewards_dist_avg = [np.mean(rewards_dist[t]) for t in range(50)]
-        rewards_ctrl_avg = [np.mean(rewards_ctrl[t]) for t in range(50)]
-        rewards_dist_std = [np.std(rewards_dist[t]) for t in range(50)]
-        rewards_ctrl_std = [np.std(rewards_ctrl[t]) for t in range(50)]
-        plt.plot(rewards_dist_avg, label="dist")
-        plt.plot(rewards_ctrl_avg, label="ctrl")
-        # Plot std
-        plt.fill_between(range(50), [rewards_dist_avg[i] - rewards_dist_std[i] for i in range(50)], [rewards_dist_avg[i] + rewards_dist_std[i] for i in range(50)], alpha=0.2)
-        plt.fill_between(range(50), [rewards_ctrl_avg[i] - rewards_ctrl_std[i] for i in range(50)], [rewards_ctrl_avg[i] + rewards_ctrl_std[i] for i in range(50)], alpha=0.2)
-        plt.xlabel("Time step")
-        plt.ylabel("Reward")
-        plt.legend()
-        plt.savefig(f"plots/{filename}_reward_dist.png")
+            for reward_type in ["pref_goal_bonus", "dist_to_goal", "chosen_to_pref", "action_reward"]:
+                reward = {t:[traj[t][-1][0][reward_type] for traj in trajs] for t in range(50)}
+                reward_avg = [np.mean(reward[t]) for t in range(50)]
+                reward_std = [np.std(reward[t]) for t in range(50)]
+                plt.plot(reward_avg, label=reward_type)
+                plt.fill_between(range(50), [reward_avg[i] - reward_std[i] for i in range(50)], [reward_avg[i] + reward_std[i] for i in range(50)], alpha=0.2)
+            plt.xlabel("Time step")
+            plt.ylabel("Reward")
+            plt.legend()
+            plt.savefig(f"plots/{filename}_reward_dist.png")
+
+            # # Set trace
+            # dist_env_to_chosen = {t:[traj[t][-1][0]["is_goal_selected"] for traj in trajs] for t in range(50)}
+            # print("dist_env_to_chosen", dist_env_to_chosen) # Problem with indexing of trajectories
+
+            act_to_goal = lambda act: [act[0,1]*np.cos(act[0,0]), act[0,1]*np.sin(act[0,0])]
+            # Plot histogram of actions
+            plt.figure()
+            plt.title("Chosen Goal Distribution")
+            goals_x = [g[0] for g in chosen_goals]
+            goals_y = [g[1] for g in chosen_goals]
+            plt.hist2d(goals_x, goals_y, bins=20, range=[[-1,1],[-1,1]])
+            plt.colorbar()
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.savefig(f"plots/{filename}_chosen_goal_dist.png")
+
+            plt.figure()
+            plt.title("Chosen Goal Distribution Scatter")
+            goals_x = [g[0] for g in chosen_goals]
+            goals_y = [g[1] for g in chosen_goals]
+            plt.scatter(goals_x, goals_y, s=0.1)
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.savefig(f"plots/{filename}_scatter_chosen_goal_dist.png")
+        else:
+            # Plot reward distribution
+            plt.figure()
+            plt.title("Reward Distribution")
+            # pdb.set_trace()
+            rewards_dist = {t:[traj[t][-1][0]["reward_dist"] for traj in trajs] for t in range(50)}
+            rewards_ctrl = {t:[traj[t][-1][0]["reward_ctrl"] for traj in trajs] for t in range(50)}
+            rewards_dist_avg = [np.mean(rewards_dist[t]) for t in range(50)]
+            rewards_ctrl_avg = [np.mean(rewards_ctrl[t]) for t in range(50)]
+            rewards_dist_std = [np.std(rewards_dist[t]) for t in range(50)]
+            rewards_ctrl_std = [np.std(rewards_ctrl[t]) for t in range(50)]
+            plt.plot(rewards_dist_avg, label="dist")
+            plt.plot(rewards_ctrl_avg, label="ctrl")
+            # Plot std
+            plt.fill_between(range(50), [rewards_dist_avg[i] - rewards_dist_std[i] for i in range(50)], [rewards_dist_avg[i] + rewards_dist_std[i] for i in range(50)], alpha=0.2)
+            plt.fill_between(range(50), [rewards_ctrl_avg[i] - rewards_ctrl_std[i] for i in range(50)], [rewards_ctrl_avg[i] + rewards_ctrl_std[i] for i in range(50)], alpha=0.2)
+            plt.xlabel("Time step")
+            plt.ylabel("Reward")
+            plt.legend()
+            plt.savefig(f"plots/{filename}_reward_dist.png")
 
         # Plot reward function
         try:
@@ -417,17 +562,17 @@ if args.stats:
  
 
         # Plot trajectory
-        plt.figure()
-        plt.title("Trajectory")
-        i = 0
-        for traj in trajs:
-            plt.plot([res[0][0,8] for res in traj], [res[0][0,9] for res in traj])
-            i += 1
-            if i > 20:
-                break
-        # plt.xlim(-1,1)
-        # plt.ylim(-1,1)
-        plt.savefig(f"plots/traj/{filename}_traj.png")
+        # plt.figure()
+        # plt.title("Trajectory")
+        # i = 0
+        # for traj in trajs:
+        #     plt.plot([res[0][0,8] for res in traj], [res[0][0,9] for res in traj])
+        #     i += 1
+        #     if i > 20:
+        #         break
+        # # plt.xlim(-1,1)
+        # # plt.ylim(-1,1)
+        # plt.savefig(f"plots/traj/{filename}_traj.png")
 
         # for traj in trajs:
         #     plt.figure()
