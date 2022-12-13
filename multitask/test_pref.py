@@ -315,7 +315,7 @@ elif args.env == "multi1d":
     def noise_fn(obs, acts, rews, infos):
         # Change to include new noisy reward structure
         noise = 0
-        for val in g:
+        for val in goal:
             noise += np.random.normal(0, args.noise*val)
         return rews + noise
     frag_length = 1

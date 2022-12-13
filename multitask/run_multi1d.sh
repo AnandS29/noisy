@@ -6,6 +6,7 @@
 # 25k timesteps
 # 90k comparisons
 
+# python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 100 --comparisons 10 --algo trpo --noise 5
 python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 5
 python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 0
 python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 20
