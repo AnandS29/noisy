@@ -1,4 +1,5 @@
 import string
+import os
 import matplotlib.pyplot as plt
 from imitation.algorithms import preference_comparisons
 from imitation.rewards.reward_nets import BasicRewardNet
@@ -25,7 +26,7 @@ import pickle
 import time
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 
-reacher_envs = ["reacher", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug"]
+reacher_envs = ["reacher", "reacher_debug", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug"]
 task_map = {
     "reach": "reach-v2",
     "push": "push-v2",
@@ -64,7 +65,7 @@ class TensorboardCallback(BaseCallback):
     def __init__(self, verbose=0):
         super(TensorboardCallback, self).__init__(verbose)
     def _on_step(self) -> bool:
-        if self.n_calls % 50000 == 0:
+        if self.n_calls % 200000 == 0:
             # Log scalar value (here a random variable)
             trajectories = collect_trajectories(self.model.env, self.model.policy, 100)
 
@@ -229,6 +230,22 @@ elif args.env == "reacher":
         # pdb.set_trace()
         return noisy_rews
     frag_length = 50
+elif args.env == "reacher_debug":
+    register_reacher_reward_env()
+    # env_name = "Reacher-v2"
+    env_name = "ReacherRewardWrapper-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        x_loc = obs[: traj_len, 9].reshape((traj_len,)) # y location of target - y location of end effector
+        def var(x):
+            if x < 0.5:
+                return args.noise
+            return 0
+        noise = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 10
 elif args.env == "reacher2":
     register_reacher_reward_env()
     # env_name = "Reacher-v2"
@@ -404,6 +421,12 @@ print(f"Reward averaged over {args.eval_episodes} episodes: {reward}")
 
 if args.stats:
     print("Saving stats...")
+    try:
+        print("Making directory...")
+        os.mkdir("plots/"+args.env)
+    except:
+        print("Directory exists")
+    filename = args.env + '/' + filename
     print(f"Filename: {filename}")
     if args.env == "linear1d":
         vals = []
@@ -461,12 +484,6 @@ if args.stats:
         
         obss = {t:[traj[t][0] for traj in trajs] for t in range(50)}
         acts_temp = {t:[traj[t][1] for traj in trajs] for t in range(50)}
-        acts = []
-        chosen_goals = []
-        for traj in trajs:
-            for t in range(50):
-                acts.append(traj[t][1])
-                chosen_goals.append(traj[t][-1][0]["chosen_goal"])
         x_obss = [[obs[0,8] for obs in obss[t]] for t in range(50)]
         y_obss = [[obs[0,9] for obs in obss[t]] for t in range(50)]
         x_obs_avg = [np.mean(np.abs(x)) for x in x_obss]
@@ -485,6 +502,13 @@ if args.stats:
         plt.savefig(f"plots/{filename}_state_dist.png") 
         
         if args.env == "active_reacher_1" or args.env == "active_reacher_2" or args.env == "active_reacher_debug":
+            acts = []
+            chosen_goals = []
+            for traj in trajs:
+                for t in range(50):
+                    acts.append(traj[t][1])
+                    chosen_goals.append(traj[t][-1][0]["chosen_goal"])
+            
             # Plot reward distribution
             plt.figure()
             plt.title("Reward Distribution")
