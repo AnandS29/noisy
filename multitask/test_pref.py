@@ -286,6 +286,22 @@ elif args.env == "linear1d":
             noise = -val
         return rews + noise
     frag_length = 1
+elif args.env == "multi1d":
+    env_name = "StatelessEnv-v0"
+    act_dim = 3
+    goal = np.array([0.2, 0.5, 0.8])
+    def r_fn(x):
+        return -np.linalg.norm(x-goal)**2
+    env_kwargs = {"action_dim": act_dim, "r_fn": r_fn}
+    register_fb_env(**env_kwargs)
+
+    def noise_fn(obs, acts, rews, infos):
+        # Change to include new noisy reward structure
+        noise = 0
+        for val in g:
+            noise += np.random.normal(0, args.noise*val)
+        return rews + noise
+    frag_length = 1
 elif args.env == "linear2d":
     env_name = "StatelessEnv-v0"
     def r_fn(x):
@@ -424,6 +440,29 @@ if args.stats:
         plt.xlabel("Action")
         plt.ylabel("Reward")
         plt.savefig(f"plots/{filename}_r_fn.png")
+    if args.env == "multi1d":
+        f = lambda x,y,z: reward_net.predict(np.array([[0]]), np.array([[x,y,z]]), np.array([[0]]), np.array([[True]]))
+        def find_optimal(fn, ub):
+            argmax = None
+            max_val = None
+            # Loop over n dimensions
+            for a in np.arange(0,ub,0.01):
+                for b in np.arange(0,ub,0.01):
+                    for c in np.arange(0,ub,0.01):
+                        val = fn(a,b,c)
+                        if max_val is None or val >= max_val:
+                            argmax = [a,b,c]
+                            max_val = val
+            return argmax
+        plt.figure()
+        plt.title("Optimal Values")
+        vals = list(np.arange(0.01,1,0.01))
+        opt = find_optimal(f, 1)
+        plt.plot(ubs, [f(x,opt[1],opt[2]) for x in vals], label="x")
+        plt.plot(ubs, [f(opt[0],y,opt[2]) for y in vals], label="y")
+        plt.plot(ubs, [f(opt[0],opt[1],z) for z in vals], label="z")
+        plt.legend()
+        plt.savefig(f"plots/{filename}_opt_val.png")
     if args.env == "linear2d":
         plt.figure()
         plt.title("Reward Function")
