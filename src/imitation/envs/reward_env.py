@@ -76,7 +76,7 @@ class ActiveReacherEnv(gym.Env):
             self.is_goal_selected = True
 
         obs = self.transform_obs(obs) # Make observation relative to the goal
-        pref_goal_bonus = -np.linalg.norm(self.goal - self.pref_goal)
+        pref_goal_bonus = -100*np.linalg.norm(self.goal - self.pref_goal)
         dist_to_goal = -np.linalg.norm(obs[8:10])
         action_reward = -np.sum(action[:len(action)-2]**2)
         info = {'pref_goal_bonus': pref_goal_bonus,

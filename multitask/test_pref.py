@@ -24,6 +24,7 @@ import pdb
 import pickle
 import time
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
+import os
 
 reacher_envs = ["reacher", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug"]
 task_map = {
@@ -404,6 +405,12 @@ print(f"Reward averaged over {args.eval_episodes} episodes: {reward}")
 
 if args.stats:
     print("Saving stats...")
+    try:
+        print("Making directory...")
+        os.mkdir("plots/"+args.env)
+    except:
+        print("Directory exists")
+    filename = args.env + '/' + filename
     print(f"Filename: {filename}")
     if args.env == "linear1d":
         vals = []
