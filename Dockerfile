@@ -49,25 +49,27 @@ ENTRYPOINT ["/usr/bin/Xdummy-entrypoint.py"]
 # code from outside the Docker container.
 FROM base as python-req
 
-WORKDIR /imitation
+WORKDIR /noisy
 # Copy over just setup.py and dependencies (__init__.py and README.md)
 # to avoid rebuilding venv when requirements have not changed.
 COPY ./setup.py ./setup.py
 COPY ./README.md ./README.md
 COPY ./src/imitation/__init__.py ./src/imitation/__init__.py
 COPY ci/build_and_activate_venv.sh ./ci/build_and_activate_venv.sh
+COPY ./.git ./.git
 RUN    ci/build_and_activate_venv.sh /venv \
     && rm -rf $HOME/.cache/pip
 
 # full stage contains everything.
 # Can be used for deployment and local testing.
-FROM python-req as full
+# FROM python-req as full
 
 # Delay copying (and installing) the code until the very end
-COPY . /imitation
-# Build a wheel then install to avoid copying whole directory (pip issue #2195)
-RUN python3 setup.py sdist bdist_wheel
-RUN pip install --upgrade dist/imitation-*.whl
+# COPY . /noisy
+# # Build a wheel then install to avoid copying whole directory (pip issue #2195)
+# RUN python3 setup.py sdist bdist_wheel
+# RUN pip install -e .
 
-# Default entrypoints
-CMD ["pytest", "-n", "auto", "-vv", "tests/"]
+# # Default entrypoints
+# # python3 test_pref.py --env linear1d --pref --stats --noise --verbose --timesteps 25000 --comparisons 90000 --algo trpo
+# CMD python3 test_pref.py --env linear1d --pref --stats --noise --verbose --timesteps 25000 --comparisons 90000 --algo trpo

@@ -1,0 +1,8 @@
+docker build . -t anandsranjan/noisy:0.0.1
+docker push anandsranjan/noisy:0.0.1
+
+yes | ctl job run --name anand-run-1d --command "/data/noisy/multitask/run_1d.sh" --shared-host-dir /home/asiththaranjan --container anandsranjan/noisy:0.0.1 --cpu 1 --gpu 1 --memory 100
+kubectl describe pods/anand-run-1d-launch-0-0
+ctl job logs
+ctl job ssh --name anand-run-1d
+ctl job list

@@ -21,4 +21,5 @@ virtualenv -p ${python_version} ${venv}
 # shellcheck disable=SC1090,SC1091
 source ${venv}/bin/activate
 python -m pip install --upgrade pip
+pip install "setuptools>=45,<46"
 pip install ".[docs,parallel,test]"

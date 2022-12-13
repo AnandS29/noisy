@@ -6,11 +6,9 @@
 # 25k timesteps
 # 90k comparisons
 
-cd /data/noisy 
-pip install sb3-contrib
-pip install -e .
-cd multitask
-python3 test_pref.py --env linear1d --pref --stats --verbose --timesteps 25000 --comparisons 1000 --algo trpo --noise 0
+python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 5
+python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 0
+python3 test_pref.py --env multi1d --pref --stats --verbose --timesteps 50000 --comparisons 100000 --algo trpo --noise 20
 
 # python3 test_pref.py --env linear1d --pref --stats --noise --verbose --timesteps 25000 --comparisons 90000 --algo trpo
 
