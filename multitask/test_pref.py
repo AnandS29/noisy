@@ -475,9 +475,10 @@ if args.stats:
         plt.title("Optimal Values")
         vals = list(np.arange(0.01,1,0.01))
         opt = find_optimal(f, 1)
-        plt.plot(ubs, [f(x,opt[1],opt[2]) for x in vals], label="x")
-        plt.plot(ubs, [f(opt[0],y,opt[2]) for y in vals], label="y")
-        plt.plot(ubs, [f(opt[0],opt[1],z) for z in vals], label="z")
+        print(f"Optimal values: {opt}")
+        plt.plot(vals, [f(x,opt[1],opt[2]) for x in vals], label="x")
+        plt.plot(vals, [f(opt[0],y,opt[2]) for y in vals], label="y")
+        plt.plot(vals, [f(opt[0],opt[1],z) for z in vals], label="z")
         plt.legend()
         plt.savefig(f"plots/{filename}_opt_val.png")
     if args.env == "linear2d":
