@@ -58,13 +58,13 @@ def collect_trajectories(env, policy, num_episodes, render=False):
     return trajectories
 
 
-class TensorboardCallback(BaseCallback):
+class ReacherCallback(BaseCallback):
     """
     Custom callback for plotting additional values in tensorboard.
     """
 
     def __init__(self, verbose=0):
-        super(TensorboardCallback, self).__init__(verbose)
+        super(ReacherCallback, self).__init__(verbose)
     def _on_step(self) -> bool:
         if self.n_calls % 200000 == 0:
             # Log scalar value (here a random variable)
@@ -94,7 +94,7 @@ class TensorboardCallback(BaseCallback):
             self.logger.record("sq dist", -np.mean(sq_dist))
         return True
 
-reacher_callback = TensorboardCallback()
+reacher_callback = ReacherCallback()
 
 # python3 test_pref.py --env linear1d --pref --random --stats --noise --verbose --timesteps 25000 --fragment_length 1
 # python3 test_pref.py --env linear1d --pref --random --stats --verbose --fragment_length 1 --timesteps 25000 --iterations 1 --parallel 10
@@ -309,7 +309,7 @@ elif args.env == "multi1d":
     goal = np.array([0.2, 0.5, 0.8])
     def r_fn(x):
         return -np.linalg.norm(x-goal)**2
-    env_kwargs = {"action_dim": act_dim, "r_fn": r_fn}
+    env_kwargs = {"action_dim": act_dim, "r_fn": r_fn, "info_fn": None}
     register_fb_env(**env_kwargs)
 
     def noise_fn(obs, acts, rews, infos):
@@ -458,6 +458,7 @@ if args.stats:
         plt.ylabel("Reward")
         plt.savefig(f"plots/{filename}_r_fn.png")
     if args.env == "multi1d":
+        # Plot optimal values
         f = lambda x,y,z: reward_net.predict(np.array([[0]]), np.array([[x,y,z]]), np.array([[0]]), np.array([[True]]))
         def find_optimal(fn, ub):
             argmax = None
@@ -481,6 +482,24 @@ if args.stats:
         plt.plot(vals, [f(opt[0],opt[1],z) for z in vals], label="z")
         plt.legend()
         plt.savefig(f"plots/{filename}_opt_val.png")
+
+        # Plot actions
+        trajs = collect_trajectories(venv, learner.policy, args.eval_episodes)
+        acts = {g:[] for g in goal}
+        for traj in trajs:
+            for t in range(len(traj)):
+                a = traj[t][1][0]
+                ind = 0
+                for g in goal:
+                    acts[g].append(a[ind])
+                    ind += 1
+        plt.figure()
+        plt.title("Action distribution")
+        for g in goal:
+            plt.hist(acts[g], 50, alpha=0.5, label=str(g))
+            # print(acts[g])
+        plt.legend()
+        plt.savefig(f"plots/{filename}_act_dist.png")
     if args.env == "linear2d":
         plt.figure()
         plt.title("Reward Function")

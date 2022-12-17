@@ -7,14 +7,15 @@ from gym.utils import seeding
 import numpy as np
 
 class RewardWrapper(gym.Wrapper):
-    def __init__(self, env, reward_fn):
+    def __init__(self, env, reward_fn, info_fn):
         super().__init__(env)
         self.reward_fn = reward_fn
         self.env = env
+        self.info_fn = info_fn
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
-        return obs, self.reward_fn(obs, action, reward, done, info), done, info
+        return obs, self.reward_fn(obs, action, reward, done, info), done, self.info_fn(obs, action, reward, done, info)
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
@@ -199,7 +200,9 @@ class InvertedDoublePendulumRewardWrapper(gym.Wrapper):
     def seed(self, seed=None):
         return self.env.seed(seed)
 
-def register_reward_env(env, r_fn, debug):
+def register_reward_env(env, r_fn, info_fn=None, debug=False):
+    if info_fn is None:
+        info_fn = lambda obs,action,reward,done,info: info
     gym.envs.register(
         id='RewardWrapper-v0',
         entry_point='__main__:RewardWrapper',
@@ -207,7 +210,8 @@ def register_reward_env(env, r_fn, debug):
         kwargs={
             'env' : env,
             'reward_fn' : r_fn,
-            'debug' : debug
+            'debug' : debug,
+            'info_fn' : info_fn,
         }
     )
 
