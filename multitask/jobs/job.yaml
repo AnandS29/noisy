@@ -1,0 +1,45 @@
+# Run a job
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: reacher2
+spec:
+  minAvailable: 1
+  schedulerName: volcano
+  queue: default
+  policies:
+  - event: PodEvicted
+    action: RestartJob
+  volumes:
+  - mountPath: /data
+    volumeClaimName: volume-claim-name
+  tasks:
+  - replicas: 1
+    name: build
+    policies:
+    - event: TaskCompleted
+      action: CompleteJob
+    template:
+      metadata:
+        name: volcano-job
+        labels:
+          environment: research
+      spec:
+        restartPolicy: OnFailure
+        # The actual container and command to run
+        containers:
+        - name: noisy
+          image: noisy  # This needs to be the actual name you gave the image when you built with Docker
+          resources:
+            requests:  # Request 1 CPU and 1 GPU
+              cpu: 1
+              nvidia.com/gpu: 1
+            limits:
+              cpu: 1
+              nvidia.com/gpu: 1
+        # Optional, only use env if you need to pass environment variables
+          # env:  
+          #  - name: SOME_ENV_VARIABLE
+          #    value: "the-value
+        # Optional, only use command if you need to run the Docker image with a command (i.e. if you didn't define CMD or ENTRYPOINT)
+          # command: ["sh", "-c", "cd /data && echo 'hi' > test.txt && cat test.txt"]
