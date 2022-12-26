@@ -117,13 +117,16 @@ class ActiveReacherEnv(gym.Env):
         return self.env.seed(seed)
 
 class ReacherRewardWrapper(gym.Wrapper):
-    def __init__(self):
+    def __init__(self, aug):
         super().__init__(gym.make('Reacher-v2'))
         self.env = gym.make('Reacher-v2')
+        self.augment = aug
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
-        return obs, -np.linalg.norm(obs[8:10]) - np.sum(action**2), done, info
+        reward = -np.linalg.norm(obs[8:10]) - np.sum(action**2)
+        reward, done, info = self.augment(obs, action, reward, done, info)
+        return obs, reward, done, info
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
@@ -226,11 +229,16 @@ def register_active_reacher_env(choose_prob, pref_goal, debug=False):
         }
     )
 
-def register_reacher_reward_env():
+def register_reacher_reward_env(aug=None):
+    if aug is None:
+        aug = lambda obs, action, reward, done, info: (reward, done, info)
     gym.envs.register(
         id='ReacherRewardWrapper-v0',
         entry_point='__main__:ReacherRewardWrapper',
         max_episode_steps=150,
+        kwargs={
+            "aug": aug,
+        }
     )
 
 def register_multi_base_env():

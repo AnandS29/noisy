@@ -27,7 +27,7 @@ import time
 from stable_baselines3.common.callbacks import BaseCallback, EveryNTimesteps
 import os
 
-reacher_envs = ["reacher", "reacher_debug", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug"]
+reacher_envs = ["reacher", "reacher_debug", "reacher2", "reacher3", "active_reacher_1", "active_reacher_2", "active_reacher_debug", "reacher_obs"]
 task_map = {
     "reach": "reach-v2",
     "push": "push-v2",
@@ -227,6 +227,38 @@ elif args.env == "reacher":
                 return args.noise
             return 0
         noise = np.array([np.random.normal(0, var(np.abs(x))) for x in x_loc])
+        noisy_rews = rews + noise
+        # pdb.set_trace()
+        return noisy_rews
+    frag_length = 50
+elif args.env == "reacher_obs":
+    goal = np.array([0.3, 0.0])
+    obs_center = np.array([0.1, 0.0])
+    obs_rad = 0.1
+    def aug(obs,action,reward,done,info):
+        rel_goal = obs[8:10] + obs[4:6] - goal
+        rel_obs = obs[8:10] + obs[4:6] - obs_center
+        dist_to_goal = -np.linalg.norm(rel_goal)
+        obstacle_penalty = -10*(np.linalg.norm(rel_obs) < obs_rad)
+        reward = dist_to_goal + obstacle_penalty
+        info["dist_to_goal"] = dist_to_goal
+        info["obstacle_penalty"] = obstacle_penalty
+        return reward, done, info
+    register_reacher_reward_env(aug)
+    # env_name = "Reacher-v2"
+    env_name = "ReacherRewardWrapper-v0"
+    def noise_fn(obs, acts, rews, infos):
+        traj_len = obs.shape[0] - 1
+        in_obs = []
+        for t in range(traj_len):
+            obs_t = obs[t,:]
+            rel_obs = obs_t[8:10] + obs_t[4:6] - obs_center
+            in_obs.append(int(np.linalg.norm(rel_obs) < obs_rad))
+        def var(x):
+            if x == 1:
+                return args.noise
+            return 0
+        noise = np.array([np.random.normal(0, var(x)) for x in in_obs])
         noisy_rews = rews + noise
         # pdb.set_trace()
         return noisy_rews
@@ -458,30 +490,30 @@ if args.stats:
         plt.ylabel("Reward")
         plt.savefig(f"plots/{filename}_r_fn.png")
     if args.env == "multi1d":
-        # Plot optimal values
-        f = lambda x,y,z: reward_net.predict(np.array([[0]]), np.array([[x,y,z]]), np.array([[0]]), np.array([[True]]))
-        def find_optimal(fn, ub):
-            argmax = None
-            max_val = None
-            # Loop over n dimensions
-            for a in np.arange(0,ub,0.01):
-                for b in np.arange(0,ub,0.01):
-                    for c in np.arange(0,ub,0.01):
-                        val = fn(a,b,c)
-                        if max_val is None or val >= max_val:
-                            argmax = [a,b,c]
-                            max_val = val
-            return argmax
-        plt.figure()
-        plt.title("Optimal Values")
-        vals = list(np.arange(0.01,1,0.01))
-        opt = find_optimal(f, 1)
-        print(f"Optimal values: {opt}")
-        plt.plot(vals, [f(x,opt[1],opt[2]) for x in vals], label="x")
-        plt.plot(vals, [f(opt[0],y,opt[2]) for y in vals], label="y")
-        plt.plot(vals, [f(opt[0],opt[1],z) for z in vals], label="z")
-        plt.legend()
-        plt.savefig(f"plots/{filename}_opt_val.png")
+        # # Plot optimal values
+        # f = lambda x,y,z: reward_net.predict(np.array([[0]]), np.array([[x,y,z]]), np.array([[0]]), np.array([[True]]))
+        # def find_optimal(fn, ub):
+        #     argmax = None
+        #     max_val = None
+        #     # Loop over n dimensions
+        #     for a in np.arange(0,ub,0.01):
+        #         for b in np.arange(0,ub,0.01):
+        #             for c in np.arange(0,ub,0.01):
+        #                 val = fn(a,b,c)
+        #                 if max_val is None or val >= max_val:
+        #                     argmax = [a,b,c]
+        #                     max_val = val
+        #     return argmax
+        # plt.figure()
+        # plt.title("Optimal Values")
+        # vals = list(np.arange(0.01,1,0.01))
+        # opt = find_optimal(f, 1)
+        # print(f"Optimal values: {opt}")
+        # plt.plot(vals, [f(x,opt[1],opt[2]) for x in vals], label="x")
+        # plt.plot(vals, [f(opt[0],y,opt[2]) for y in vals], label="y")
+        # plt.plot(vals, [f(opt[0],opt[1],z) for z in vals], label="z")
+        # plt.legend()
+        # plt.savefig(f"plots/{filename}_opt_val.png")
 
         # Plot actions
         trajs = collect_trajectories(venv, learner.policy, args.eval_episodes)
@@ -609,6 +641,35 @@ if args.stats:
             plt.xlabel("x")
             plt.ylabel("y")
             plt.savefig(f"plots/{filename}_scatter_chosen_goal_dist.png")
+        elif args.env == "reacher_obs":
+            # Plot reward distribution
+            plt.figure()
+            plt.title("Reward Distribution")
+            # pdb.set_trace()
+            rewards_dist = {t:[traj[t][-1][0]["dist_to_goal"] for traj in trajs] for t in range(50)}
+            rewards_ctrl = {t:[traj[t][-1][0]["obstacle_penalty"] for traj in trajs] for t in range(50)}
+            rewards_dist_avg = [np.mean(rewards_dist[t]) for t in range(50)]
+            rewards_ctrl_avg = [np.mean(rewards_ctrl[t]) for t in range(50)]
+            rewards_dist_std = [np.std(rewards_dist[t]) for t in range(50)]
+            rewards_ctrl_std = [np.std(rewards_ctrl[t]) for t in range(50)]
+            plt.plot(rewards_dist_avg, label="dist")
+            plt.plot(rewards_ctrl_avg, label="obs")
+            # Plot std
+            plt.fill_between(range(50), [rewards_dist_avg[i] - rewards_dist_std[i] for i in range(50)], [rewards_dist_avg[i] + rewards_dist_std[i] for i in range(50)], alpha=0.2)
+            plt.fill_between(range(50), [rewards_ctrl_avg[i] - rewards_ctrl_std[i] for i in range(50)], [rewards_ctrl_avg[i] + rewards_ctrl_std[i] for i in range(50)], alpha=0.2)
+            plt.xlabel("Time step")
+            plt.ylabel("Reward")
+            plt.legend()
+            plt.savefig(f"plots/{filename}_reward_dist.png")
+
+            # Plot trajectory
+            plt.figure()
+            plt.title("Trajectory")
+            for traj in trajs:
+                plt.plot([t[0][0] for t in traj], [t[0][1] for t in traj], alpha=0.1)
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.savefig(f"plots/{filename}_trajectory.png")
         else:
             # Plot reward distribution
             plt.figure()
