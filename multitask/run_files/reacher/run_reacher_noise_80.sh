@@ -1,7 +1,13 @@
 #!/bin/bash
+cd /data/noisy
+# mkdir -p /root/.mujoco \
+#     && wget https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O mujoco.tar.gz \
+#     && tar -xf mujoco.tar.gz -C /root/.mujoco \
+#     && rm mujoco.tar.gz
+# export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/anandsranjan/.mujoco/mujoco210/bin
 
-cd /data/noisy 
 pip install sb3-contrib
+pip install mujoco_py
 pip install -e .
 cd multitask
 

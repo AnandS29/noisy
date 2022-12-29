@@ -25,6 +25,7 @@ RUN apt-get update -q \
     unzip \
     vim \
     virtualenv \
+    wget \
     xpra \
     xserver-xorg-dev \
     patchelf  \
@@ -37,6 +38,15 @@ ENV LANG C.UTF-8
 # This is since we may create the venv outside of Docker, e.g. in CI
 # or by binding it in for local development.
 ENV PATH="/venv/bin:$PATH"
+ENV LD_LIBRARY_PATH /usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+
+# Install MuJoCo
+RUN mkdir -p /root/.mujoco \
+    && wget https://mujoco.org/download/mujoco210-linux-x86_64.tar.gz -O mujoco.tar.gz \
+    && tar -xf mujoco.tar.gz -C /root/.mujoco \
+    && rm mujoco.tar.gz
+
+ENV LD_LIBRARY_PATH /root/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH}
 ENV LD_LIBRARY_PATH /usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
 
 # Run Xdummy mock X server by default so that rendering will work.

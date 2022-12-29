@@ -6,3 +6,7 @@ kubectl describe pods/anand-run-1d-launch-0-0
 ctl job logs
 ctl job ssh --name anand-run-1d
 ctl job list
+
+kubectl exec -it <pod name> -- /bin/bash
+
+# https://kb.hofvarpnir.ai/doc/useful-commands-n0YjcGebqL
