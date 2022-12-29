@@ -666,7 +666,8 @@ if args.stats:
             plt.figure()
             plt.title("Trajectory")
             for traj in trajs:
-                plt.plot([t[0][0] for t in traj], [t[0][1] for t in traj], alpha=0.1)
+                # pdb.set_trace()
+                plt.plot([t[0][0,0] for t in traj], [t[0][0,1] for t in traj], alpha=0.1)
             plt.xlabel("x")
             plt.ylabel("y")
             plt.savefig(f"plots/{filename}_trajectory.png")
