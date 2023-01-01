@@ -74,6 +74,8 @@ class ReacherCallback(BaseCallback):
             y_dist = np.array([np.sum([(np.abs(res[0][0,9])) for res in traj]) for traj in trajectories])
             x_dist_last = np.array([np.abs(traj[-1][0][0,8]) for traj in trajectories])
             y_dist_last = np.array([np.abs(traj[-1][0][0,9]) for traj in trajectories])
+            x_last = np.array([traj[-1][0][0,8] + traj[-1][0][0,4] for traj in trajectories])
+            y_last = np.array([traj[-1][0][0,9] + traj[-1][0][0,5] for traj in trajectories])
             dist = np.array([
                 np.sum([np.linalg.norm(res[0][0,8:10]) for res in traj]) 
             for traj in trajectories])
@@ -92,6 +94,9 @@ class ReacherCallback(BaseCallback):
             self.logger.record("y_dist", -np.mean(y_dist))
             self.logger.record("dist", -np.mean(dist))
             self.logger.record("sq dist", -np.mean(sq_dist))
+
+            # self.logger.record("x_last", np.mean(x_last))
+            # self.logger.record("y_last", np.mean(y_last))
         return True
 
 reacher_callback = ReacherCallback()
@@ -236,10 +241,10 @@ elif args.env == "reacher_obs":
     obs_center = np.array([0.1, 0.0])
     obs_rad = 0.1
     def aug(obs,action,reward,done,info):
-        rel_goal = obs[8:10] + obs[4:6] - goal
+        # rel_goal = obs[8:10] + obs[4:6] - goal
         rel_obs = obs[8:10] + obs[4:6] - obs_center
-        dist_to_goal = -np.linalg.norm(rel_goal)
-        obstacle_penalty = -10*(np.linalg.norm(rel_obs) < obs_rad)
+        dist_to_goal = -np.linalg.norm(obs[8:10])
+        obstacle_penalty = -50*(np.linalg.norm(rel_obs) < obs_rad)
         reward = dist_to_goal + obstacle_penalty
         info["dist_to_goal"] = dist_to_goal
         info["obstacle_penalty"] = obstacle_penalty
@@ -592,7 +597,7 @@ if args.stats:
         plt.ylabel("Distance")
         plt.legend()
         plt.savefig(f"plots/{filename}_state_dist.png") 
-        
+        print(args.env)
         if args.env == "active_reacher_1" or args.env == "active_reacher_2" or args.env == "active_reacher_debug":
             acts = []
             chosen_goals = []
@@ -642,6 +647,7 @@ if args.stats:
             plt.ylabel("y")
             plt.savefig(f"plots/{filename}_scatter_chosen_goal_dist.png")
         elif args.env == "reacher_obs":
+            print("reacher_obs part")
             # Plot reward distribution
             plt.figure()
             plt.title("Reward Distribution")
@@ -667,7 +673,7 @@ if args.stats:
             plt.title("Trajectory")
             for traj in trajs:
                 # pdb.set_trace()
-                plt.plot([t[0][0,0] for t in traj], [t[0][0,1] for t in traj], alpha=0.1)
+                plt.plot([t[0][0,8]+t[0][0,4] for t in traj], [t[0][0,9]+t[0][0,5] for t in traj], alpha=0.1)
             plt.xlabel("x")
             plt.ylabel("y")
             plt.savefig(f"plots/{filename}_trajectory.png")
